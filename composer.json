@@ -1,0 +1,79 @@
+{
+    "name": "logdbhq/logdb-php",
+    "description": "LogDB SDK for PHP. Universal OTLP HTTP/JSON writer for Laravel, Symfony, Monolog, and standalone PHP services.",
+    "type": "library",
+    "license": "MIT",
+    "keywords": [
+        "logdb",
+        "logging",
+        "observability",
+        "otlp",
+        "opentelemetry",
+        "monolog",
+        "laravel",
+        "psr-3"
+    ],
+    "homepage": "https://github.com/logdbhq/logdb-php",
+    "support": {
+        "issues": "https://github.com/logdbhq/logdb-php/issues",
+        "source": "https://github.com/logdbhq/logdb-php",
+        "docs": "https://docs.logdb.dev/web/overview"
+    },
+    "require": {
+        "php": "^8.1",
+        "ext-curl": "*",
+        "ext-json": "*",
+        "psr/log": "^2.0 || ^3.0"
+    },
+    "require-dev": {
+        "phpunit/phpunit": "^10.5",
+        "phpstan/phpstan": "^1.11",
+        "friendsofphp/php-cs-fixer": "^3.59",
+        "guzzlehttp/guzzle": "^7.8",
+        "guzzlehttp/psr7": "^2.6",
+        "monolog/monolog": "^3.6",
+        "illuminate/support": "^10.0 || ^11.0"
+    },
+    "suggest": {
+        "guzzlehttp/guzzle": "Recommended PSR-18 HTTP client implementation.",
+        "monolog/monolog": "Required if you want to use the LogDBHandler with Monolog.",
+        "illuminate/support": "Required if you want to use the Laravel service provider."
+    },
+    "autoload": {
+        "psr-4": {
+            "LogDB\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "LogDB\\Tests\\": "tests/"
+        }
+    },
+    "scripts": {
+        "test": "phpunit",
+        "analyse": "phpstan analyse --memory-limit=512M",
+        "cs": "php-cs-fixer fix --dry-run --diff",
+        "cs:fix": "php-cs-fixer fix",
+        "check": [
+            "@cs",
+            "@analyse",
+            "@test"
+        ]
+    },
+    "config": {
+        "sort-packages": true,
+        "allow-plugins": {}
+    },
+    "extra": {
+        "laravel": {
+            "providers": [
+                "LogDB\\Integrations\\Laravel\\LogDBServiceProvider"
+            ]
+        },
+        "branch-alias": {
+            "dev-master": "0.1.x-dev"
+        }
+    },
+    "minimum-stability": "stable",
+    "prefer-stable": true
+}

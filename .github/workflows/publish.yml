@@ -1,0 +1,53 @@
+name: Publish
+
+# Packagist publishes via webhook on tag — this workflow is mostly a sanity gate.
+# When a v* tag is pushed, we re-run the full check matrix and then notify
+# Packagist explicitly via its update endpoint (in case the webhook is missed).
+
+on:
+  push:
+    tags: ['v*']
+
+jobs:
+  verify:
+    name: Verify on PHP ${{ matrix.php }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: true
+      matrix:
+        php: ['8.1', '8.2', '8.3']
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          extensions: curl, json, mbstring
+          coverage: none
+          tools: composer:v2
+
+      - name: Install dependencies
+        run: composer install --prefer-dist --no-progress --no-interaction
+
+      - name: Run check
+        run: composer check
+
+  notify-packagist:
+    name: Notify Packagist
+    needs: verify
+    runs-on: ubuntu-latest
+    steps:
+      - name: POST to Packagist
+        env:
+          PACKAGIST_USERNAME: ${{ secrets.PACKAGIST_USERNAME }}
+          PACKAGIST_TOKEN: ${{ secrets.PACKAGIST_TOKEN }}
+        run: |
+          if [ -z "$PACKAGIST_USERNAME" ] || [ -z "$PACKAGIST_TOKEN" ]; then
+            echo "Packagist credentials not set — relying on the GitHub webhook."
+            exit 0
+          fi
+          curl -fsSL -XPOST -H 'content-type:application/json' \
+            "https://packagist.org/api/update-package?username=${PACKAGIST_USERNAME}&apiToken=${PACKAGIST_TOKEN}" \
+            -d '{"repository":{"url":"https://github.com/logdbhq/logdb-php"}}'

@@ -1,0 +1,13 @@
+parameters:
+    level: 8
+    paths:
+        - src
+        - tests
+    excludePaths:
+        - tests/_fixtures/*
+    treatPhpDocTypesAsCertain: false
+    ignoreErrors:
+        # Laravel + Monolog integrations are guarded by class_exists checks; PHPStan
+        # cannot prove the optional dependencies are present in CI.
+        - identifier: missingType.iterableValue
+        - '#Class Illuminate\\.* not found#'

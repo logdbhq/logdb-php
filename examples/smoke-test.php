@@ -52,7 +52,7 @@ $s1 = $client->info("PSR-3 path probe={$probe}", [
     'amount_eur' => 199.99,
     'verified' => true,
 ]);
-echo "PSR-3 info():    " . ($s1 === null ? 'void (PSR-3 returns nothing)' : '') . "\n";
+echo 'PSR-3 info():    ' . ($s1 === null ? 'void (PSR-3 returns nothing)' : '') . "\n";
 
 $s2 = LogEventBuilder::create($client)
     ->setMessage("builder path probe={$probe}")
@@ -63,14 +63,14 @@ $s2 = LogEventBuilder::create($client)
     ->addAttribute('currency', 'EUR')
     ->addLabel('payment')
     ->log();
-echo "LogEventBuilder: " . statusName($s2) . "\n";
+echo 'LogEventBuilder: ' . statusName($s2) . "\n";
 
 $s3 = LogBeatBuilder::create($client)
     ->setMeasurement('smoke.heartbeat')
     ->addTag('probe', $probe)
     ->addField('value', 1)
     ->log();
-echo "LogBeatBuilder:  " . statusName($s3) . "\n";
+echo 'LogBeatBuilder:  ' . statusName($s3) . "\n";
 
 $client->dispose();
 

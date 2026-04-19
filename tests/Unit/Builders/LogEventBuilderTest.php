@@ -6,7 +6,6 @@ namespace LogDB\Tests\Unit\Builders;
 
 use DateTimeImmutable;
 use LogDB\Builders\LogEventBuilder;
-use LogDB\Models\Log;
 use LogDB\Models\LogLevel;
 use LogDB\Models\LogResponseStatus;
 use LogDB\Tests\Support\InMemoryClient;

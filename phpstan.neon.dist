@@ -6,8 +6,12 @@ parameters:
     excludePaths:
         - tests/_fixtures/*
     treatPhpDocTypesAsCertain: false
+    reportUnmatchedIgnoredErrors: false
     ignoreErrors:
-        # Laravel + Monolog integrations are guarded by class_exists checks; PHPStan
-        # cannot prove the optional dependencies are present in CI.
         - identifier: missingType.iterableValue
+        # Laravel + Monolog integrations may run without the optional dependency installed.
         - '#Class Illuminate\\.* not found#'
+        # `RetryPolicy::execute` rethrows the inner exception type after exhausting retries —
+        # PHPStan can't infer that the closure's thrown type bubbles out.
+        - '#Dead catch - LogDB\\Errors\\LogDB(Timeout|Auth|Config)Error is never thrown in the try block.#'
+        - '#Unreachable statement - code above always terminates.#'

@@ -48,15 +48,16 @@ final class CircuitBreakerTest extends TestCase
             },
         );
 
-        // 5 calls, 3 failures → 60% failure rate → trip
+        // The breaker only re-checks on failure. Sequence: 2 successes, then 3
+        // failures. After the 3rd failure: throughput=5, failure rate=60%, trips.
+        $breaker->execute(static fn () => 'ok');
+        $breaker->execute(static fn () => 'ok');
         for ($i = 0; $i < 3; $i++) {
             try {
                 $breaker->execute(static fn () => throw new LogDBNetworkError('x'));
             } catch (LogDBNetworkError) {
             }
         }
-        $breaker->execute(static fn () => 'ok');
-        $breaker->execute(static fn () => 'ok');
 
         $this->assertSame(CircuitBreaker::STATE_OPEN, $breaker->getState());
 

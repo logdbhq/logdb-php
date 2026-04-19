@@ -81,14 +81,22 @@ final class LogDBClient extends AbstractLogger implements LogDBClientLike
     {
         $logLevel = self::psrLevelToLogLevel($level);
         $log = $this->buildLogFromPsr($logLevel, (string) $message, $context);
-        $this->dispatch(BatchEngine::TYPE_LOG, $log);
+        $this->logEntry($log);
     }
 
     // ── Typed API (LogDBClientLike) ─────────────────────────────
 
     public function logEntry(Log $log): LogResponseStatus
     {
-        return $this->dispatch(BatchEngine::TYPE_LOG, $this->normaliseLog($log));
+        $this->assertOpen();
+        $normalised = $this->normaliseLog($log);
+
+        if ($this->opts->enableBatching) {
+            $this->ensureBatchEngine()->enqueueLog($normalised);
+            return LogResponseStatus::Success;
+        }
+        $transport = $this->ensureTransport();
+        return $this->runWithResilience(static fn () => $transport->sendLog($normalised));
     }
 
     /** @param Log[] $logs */
@@ -97,13 +105,26 @@ final class LogDBClient extends AbstractLogger implements LogDBClientLike
         if ($logs === []) {
             return LogResponseStatus::Success;
         }
+        $this->assertOpen();
         $normalised = array_map(fn (Log $l) => $this->normaliseLog($l), $logs);
-        return $this->dispatchBatch(BatchEngine::TYPE_LOG, $normalised);
+        $transport = $this->ensureTransport();
+        return $this->runWithResilience(
+            static fn () => $transport->sendLogBatch($normalised),
+            $normalised,
+        );
     }
 
     public function logBeat(LogBeat $beat): LogResponseStatus
     {
-        return $this->dispatch(BatchEngine::TYPE_LOG_BEAT, $this->normaliseBeat($beat));
+        $this->assertOpen();
+        $normalised = $this->normaliseBeat($beat);
+
+        if ($this->opts->enableBatching) {
+            $this->ensureBatchEngine()->enqueueLogBeat($normalised);
+            return LogResponseStatus::Success;
+        }
+        $transport = $this->ensureTransport();
+        return $this->runWithResilience(static fn () => $transport->sendLogBeat($normalised));
     }
 
     /** @param LogBeat[] $beats */
@@ -112,13 +133,23 @@ final class LogDBClient extends AbstractLogger implements LogDBClientLike
         if ($beats === []) {
             return LogResponseStatus::Success;
         }
+        $this->assertOpen();
         $normalised = array_map(fn (LogBeat $b) => $this->normaliseBeat($b), $beats);
-        return $this->dispatchBatch(BatchEngine::TYPE_LOG_BEAT, $normalised);
+        $transport = $this->ensureTransport();
+        return $this->runWithResilience(static fn () => $transport->sendLogBeatBatch($normalised));
     }
 
     public function logCache(LogCache $cache): LogResponseStatus
     {
-        return $this->dispatch(BatchEngine::TYPE_LOG_CACHE, $this->normaliseCache($cache));
+        $this->assertOpen();
+        $normalised = $this->normaliseCache($cache);
+
+        if ($this->opts->enableBatching) {
+            $this->ensureBatchEngine()->enqueueLogCache($normalised);
+            return LogResponseStatus::Success;
+        }
+        $transport = $this->ensureTransport();
+        return $this->runWithResilience(static fn () => $transport->sendLogCache($normalised));
     }
 
     /** @param LogCache[] $caches */
@@ -127,8 +158,10 @@ final class LogDBClient extends AbstractLogger implements LogDBClientLike
         if ($caches === []) {
             return LogResponseStatus::Success;
         }
+        $this->assertOpen();
         $normalised = array_map(fn (LogCache $c) => $this->normaliseCache($c), $caches);
-        return $this->dispatchBatch(BatchEngine::TYPE_LOG_CACHE, $normalised);
+        $transport = $this->ensureTransport();
+        return $this->runWithResilience(static fn () => $transport->sendLogCacheBatch($normalised));
     }
 
     public function flush(): void
@@ -159,55 +192,9 @@ final class LogDBClient extends AbstractLogger implements LogDBClientLike
 
     // ── Internals ───────────────────────────────────────────────
 
-    private function dispatch(string $type, Log|LogBeat|LogCache $payload): LogResponseStatus
-    {
-        $this->assertOpen();
-
-        if ($this->opts->enableBatching) {
-            $engine = $this->ensureBatchEngine();
-            match ($type) {
-                BatchEngine::TYPE_LOG => $engine->enqueueLog($payload),
-                BatchEngine::TYPE_LOG_BEAT => $engine->enqueueLogBeat($payload),
-                BatchEngine::TYPE_LOG_CACHE => $engine->enqueueLogCache($payload),
-            };
-            return LogResponseStatus::Success;
-        }
-
-        return $this->sendDirectSingle($type, $payload);
-    }
-
     /**
-     * @param list<Log>|list<LogBeat>|list<LogCache> $items
-     */
-    private function dispatchBatch(string $type, array $items): LogResponseStatus
-    {
-        $this->assertOpen();
-        $transport = $this->ensureTransport();
-
-        return $this->runWithResilience(static function () use ($type, $transport, $items): void {
-            match ($type) {
-                BatchEngine::TYPE_LOG => $transport->sendLogBatch($items),
-                BatchEngine::TYPE_LOG_BEAT => $transport->sendLogBeatBatch($items),
-                BatchEngine::TYPE_LOG_CACHE => $transport->sendLogCacheBatch($items),
-            };
-        }, $items);
-    }
-
-    private function sendDirectSingle(string $type, Log|LogBeat|LogCache $payload): LogResponseStatus
-    {
-        $transport = $this->ensureTransport();
-        return $this->runWithResilience(static function () use ($type, $transport, $payload): void {
-            match ($type) {
-                BatchEngine::TYPE_LOG => $transport->sendLog($payload),
-                BatchEngine::TYPE_LOG_BEAT => $transport->sendLogBeat($payload),
-                BatchEngine::TYPE_LOG_CACHE => $transport->sendLogCache($payload),
-            };
-        });
-    }
-
-    /**
-     * @param Closure(): void                            $fn
-     * @param list<Log>|list<LogBeat>|list<LogCache>|null $batchForCallback
+     * @param Closure(): void                                            $fn
+     * @param list<Log>|list<LogBeat>|list<LogCache>|null                $batchForCallback
      */
     private function runWithResilience(Closure $fn, ?array $batchForCallback = null): LogResponseStatus
     {
@@ -266,7 +253,7 @@ final class LogDBClient extends AbstractLogger implements LogDBClientLike
         }
         $transport = $this->ensureTransport();
         $self = $this;
-        $this->batch = new BatchEngine(
+        $batch = new BatchEngine(
             transport: $transport,
             batchSize: $this->opts->batchSize,
             flushIntervalMs: $this->opts->flushInterval,
@@ -277,6 +264,7 @@ final class LogDBClient extends AbstractLogger implements LogDBClientLike
                 $self->emitError($err);
             },
         );
+        $this->batch = $batch;
 
         if ($this->opts->flushOnShutdown && !$this->shutdownRegistered) {
             $this->shutdownRegistered = true;
@@ -291,7 +279,7 @@ final class LogDBClient extends AbstractLogger implements LogDBClientLike
             });
         }
 
-        return $this->batch;
+        return $batch;
     }
 
     private function assertOpen(): void
@@ -434,7 +422,7 @@ final class LogDBClient extends AbstractLogger implements LogDBClientLike
             $log->attributesD = $dateMap;
         }
 
-        return $this->normaliseLog($log);
+        return $log;
     }
 
     /** PSR-3 `{placeholder}` interpolation. */

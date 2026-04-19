@@ -16,7 +16,7 @@ use LogDB\Transport\TransportInterface;
  *
  * @phpstan-type Batch array{type: string, items: array<int, Log|LogBeat|LogCache>}
  */
-final class RecordingTransport implements TransportInterface
+class RecordingTransport implements TransportInterface
 {
     /** @var list<Batch> */
     public array $batches = [];
@@ -36,6 +36,7 @@ final class RecordingTransport implements TransportInterface
         if (in_array('log', $this->failSingleTypes, true)) {
             throw new LogDBNetworkError('forced single failure');
         }
+        $this->batches[] = ['type' => 'log', 'items' => [$log]];
     }
 
     public function sendLogBatch(array $logs): void
@@ -52,6 +53,7 @@ final class RecordingTransport implements TransportInterface
         if (in_array('logBeat', $this->failSingleTypes, true)) {
             throw new LogDBNetworkError('forced single failure');
         }
+        $this->batches[] = ['type' => 'logBeat', 'items' => [$beat]];
     }
 
     public function sendLogBeatBatch(array $beats): void
@@ -68,6 +70,7 @@ final class RecordingTransport implements TransportInterface
         if (in_array('logCache', $this->failSingleTypes, true)) {
             throw new LogDBNetworkError('forced single failure');
         }
+        $this->batches[] = ['type' => 'logCache', 'items' => [$cache]];
     }
 
     public function sendLogCacheBatch(array $caches): void

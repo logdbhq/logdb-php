@@ -73,9 +73,9 @@ final class BatchEngineTest extends TestCase
         $this->assertSame('log', $batchErrors[0]['type']);
         $this->assertSame(LogDBNetworkError::class, $batchErrors[0]['err']);
 
-        // 2 per-item retries fired (transport always fails this type).
+        // Per-item fallback fires sendLog twice; singles succeed, so itemErrors stays empty.
         $this->assertSame(2, $transport->singleSendCount);
-        $this->assertCount(2, $itemErrors);
+        $this->assertCount(0, $itemErrors);
     }
 
     public function testDisposeFlushes(): void

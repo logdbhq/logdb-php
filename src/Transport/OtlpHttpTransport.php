@@ -40,7 +40,11 @@ final class OtlpHttpTransport implements TransportInterface
     /** Persistent curl handle so the underlying TCP/TLS connection can be reused. */
     private ?\CurlHandle $curl = null;
 
-    /** Optional injection point for tests — receives the request and returns [statusCode, body]. */
+    /**
+     * Optional injection point for tests — receives the request and returns [statusCode, body].
+     *
+     * @var (callable(string $url, string $body, array<string, string> $headers, int $timeoutMs): array{0: int, 1: string})|null
+     */
     private $sender;
 
     /**

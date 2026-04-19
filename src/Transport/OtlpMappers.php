@@ -7,7 +7,6 @@ namespace LogDB\Transport;
 use LogDB\Models\Log;
 use LogDB\Models\LogBeat;
 use LogDB\Models\LogCache;
-use LogDB\Models\LogMeta;
 
 /**
  * OTLP/JSON request body builders.

@@ -5,7 +5,9 @@ declare(strict_types=1);
 namespace LogDB\Tests\Integration;
 
 use DateTimeImmutable;
+use LogDB\Errors\LogDBAuthError;
 use LogDB\LogDBClient;
+use LogDB\Models\Log;
 use LogDB\Models\LogLevel;
 use LogDB\Models\LogResponseStatus;
 use LogDB\Options\LogDBClientOptions;
@@ -36,6 +38,7 @@ final class LogDBClientTest extends TestCase
         $this->assertCount(1, $items);
 
         $log = $items[0];
+        $this->assertInstanceOf(Log::class, $log);
         $this->assertSame('user logged in', $log->message);
         $this->assertSame(LogLevel::Info, $log->level);
         $this->assertSame('test-app', $log->application);
@@ -59,6 +62,7 @@ final class LogDBClientTest extends TestCase
         $client->error('handler failed', ['exception' => $err]);
 
         $log = $transport->batches[0]['items'][0];
+        $this->assertInstanceOf(Log::class, $log);
         $this->assertSame(LogLevel::Error, $log->level);
         $this->assertNotNull($log->exception);
         $this->assertStringContainsString('boom', $log->exception);
@@ -75,6 +79,7 @@ final class LogDBClientTest extends TestCase
 
         $client->info('user {id} logged in', ['id' => 42]);
         $log = $transport->batches[0]['items'][0];
+        $this->assertInstanceOf(Log::class, $log);
         $this->assertSame('user 42 logged in', $log->message);
     }
 
@@ -120,9 +125,9 @@ final class LogDBClientTest extends TestCase
 
         // Substitute a transport that throws an AuthError instead of generic network.
         $authTransport = new class () extends RecordingTransport {
-            public function sendLog(\LogDB\Models\Log $log): void
+            public function sendLog(Log $log): void
             {
-                throw new \LogDB\Errors\LogDBAuthError();
+                throw new LogDBAuthError();
             }
         };
 
@@ -130,7 +135,7 @@ final class LogDBClientTest extends TestCase
             $this->options(['enableBatching' => false, 'maxRetries' => 0]),
             $authTransport,
         );
-        $status = $client->logEntry(new \LogDB\Models\Log(message: 'x'));
+        $status = $client->logEntry(new Log(message: 'x'));
         $this->assertSame(LogResponseStatus::NotAuthorized, $status);
     }
 
@@ -142,8 +147,9 @@ final class LogDBClientTest extends TestCase
             $transport,
         );
 
-        $client->logEntry(new \LogDB\Models\Log(message: 'm'));
+        $client->logEntry(new Log(message: 'm'));
         $log = $transport->batches[0]['items'][0];
+        $this->assertInstanceOf(Log::class, $log);
 
         $this->assertNotNull($log->guid);
         $this->assertNotNull($log->timestamp);

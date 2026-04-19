@@ -27,17 +27,22 @@ final class BatchEngine
     public const TYPE_LOG_BEAT = 'logBeat';
     public const TYPE_LOG_CACHE = 'logCache';
 
-    /** @var array{log: list<Log>, logBeat: list<LogBeat>, logCache: list<LogCache>} */
-    private array $buffers = ['log' => [], 'logBeat' => [], 'logCache' => []];
+    /** @var list<Log> */
+    private array $logs = [];
+    /** @var list<LogBeat> */
+    private array $beats = [];
+    /** @var list<LogCache> */
+    private array $caches = [];
 
     /** Wall-clock timestamp (ms) of the oldest entry in any buffer, or 0 if empty. */
     private float $oldestEnqueuedMs = 0.0;
 
     private bool $disposed = false;
 
-    /** @var (Closure(\Throwable, string, list<Log>|list<LogBeat>|list<LogCache>): void)|null */
+    /** @var (Closure(Throwable, string, list<Log>|list<LogBeat>|list<LogCache>): void)|null */
     private $onBatchError;
-    /** @var (Closure(\Throwable, string, Log|LogBeat|LogCache): void)|null */
+
+    /** @var (Closure(Throwable, string, Log|LogBeat|LogCache): void)|null */
     private $onItemError;
 
     public function __construct(
@@ -53,29 +58,43 @@ final class BatchEngine
 
     public function enqueueLog(Log $log): void
     {
-        $this->enqueue(self::TYPE_LOG, $log);
+        $this->beforeEnqueue();
+        $this->logs[] = $log;
+        $this->maybeFlush(count($this->logs));
     }
 
     public function enqueueLogBeat(LogBeat $beat): void
     {
-        $this->enqueue(self::TYPE_LOG_BEAT, $beat);
+        $this->beforeEnqueue();
+        $this->beats[] = $beat;
+        $this->maybeFlush(count($this->beats));
     }
 
     public function enqueueLogCache(LogCache $cache): void
     {
-        $this->enqueue(self::TYPE_LOG_CACHE, $cache);
+        $this->beforeEnqueue();
+        $this->caches[] = $cache;
+        $this->maybeFlush(count($this->caches));
     }
 
     public function flush(): void
     {
-        $drained = $this->buffers;
-        $this->buffers = ['log' => [], 'logBeat' => [], 'logCache' => []];
+        $logs = $this->logs;
+        $beats = $this->beats;
+        $caches = $this->caches;
+        $this->logs = [];
+        $this->beats = [];
+        $this->caches = [];
         $this->oldestEnqueuedMs = 0.0;
 
-        foreach ([self::TYPE_LOG, self::TYPE_LOG_BEAT, self::TYPE_LOG_CACHE] as $type) {
-            if ($drained[$type] !== []) {
-                $this->sendBatchOrFallback($type, $drained[$type]);
-            }
+        if ($logs !== []) {
+            $this->flushLogs($logs);
+        }
+        if ($beats !== []) {
+            $this->flushBeats($beats);
+        }
+        if ($caches !== []) {
+            $this->flushCaches($caches);
         }
     }
 
@@ -90,75 +109,92 @@ final class BatchEngine
 
     public function totalSize(): int
     {
-        return count($this->buffers['log'])
-            + count($this->buffers['logBeat'])
-            + count($this->buffers['logCache']);
+        return count($this->logs) + count($this->beats) + count($this->caches);
     }
 
-    private function enqueue(string $type, Log|LogBeat|LogCache $payload): void
+    // ── internals ───────────────────────────────────────────────
+
+    private function beforeEnqueue(): void
     {
         if ($this->disposed) {
             throw new \RuntimeException('BatchEngine is disposed');
         }
-
         if ($this->oldestEnqueuedMs === 0.0) {
             $this->oldestEnqueuedMs = microtime(true) * 1000.0;
         }
+    }
 
-        $this->buffers[$type][] = $payload;
-
-        $bufferSize = count($this->buffers[$type]);
+    private function maybeFlush(int $bufferSize): void
+    {
         $elapsedMs = (microtime(true) * 1000.0) - $this->oldestEnqueuedMs;
-
         if ($bufferSize >= $this->batchSize || $elapsedMs >= $this->flushIntervalMs) {
             $this->flush();
         }
     }
 
-    /**
-     * @param list<Log>|list<LogBeat>|list<LogCache> $items
-     */
-    private function sendBatchOrFallback(string $type, array $items): void
+    /** @param list<Log> $items */
+    private function flushLogs(array $items): void
     {
         try {
-            $this->sendBatch($type, $items);
+            $this->transport->sendLogBatch($items);
             return;
         } catch (Throwable $batchErr) {
             if ($this->onBatchError !== null) {
-                ($this->onBatchError)($batchErr, $type, $items);
+                ($this->onBatchError)($batchErr, self::TYPE_LOG, $items);
             }
-
-            // Per-item fallback so one bad payload can't poison the batch.
             foreach ($items as $item) {
                 try {
-                    $this->sendOne($type, $item);
+                    $this->transport->sendLog($item);
                 } catch (Throwable $itemErr) {
                     if ($this->onItemError !== null) {
-                        ($this->onItemError)($itemErr, $type, $item);
+                        ($this->onItemError)($itemErr, self::TYPE_LOG, $item);
                     }
                 }
             }
         }
     }
 
-    /**
-     * @param list<Log>|list<LogBeat>|list<LogCache> $items
-     */
-    private function sendBatch(string $type, array $items): void
+    /** @param list<LogBeat> $items */
+    private function flushBeats(array $items): void
     {
-        match ($type) {
-            self::TYPE_LOG => $this->transport->sendLogBatch($items),
-            self::TYPE_LOG_BEAT => $this->transport->sendLogBeatBatch($items),
-            self::TYPE_LOG_CACHE => $this->transport->sendLogCacheBatch($items),
-        };
+        try {
+            $this->transport->sendLogBeatBatch($items);
+            return;
+        } catch (Throwable $batchErr) {
+            if ($this->onBatchError !== null) {
+                ($this->onBatchError)($batchErr, self::TYPE_LOG_BEAT, $items);
+            }
+            foreach ($items as $item) {
+                try {
+                    $this->transport->sendLogBeat($item);
+                } catch (Throwable $itemErr) {
+                    if ($this->onItemError !== null) {
+                        ($this->onItemError)($itemErr, self::TYPE_LOG_BEAT, $item);
+                    }
+                }
+            }
+        }
     }
 
-    private function sendOne(string $type, Log|LogBeat|LogCache $item): void
+    /** @param list<LogCache> $items */
+    private function flushCaches(array $items): void
     {
-        match ($type) {
-            self::TYPE_LOG => $this->transport->sendLog($item),
-            self::TYPE_LOG_BEAT => $this->transport->sendLogBeat($item),
-            self::TYPE_LOG_CACHE => $this->transport->sendLogCache($item),
-        };
+        try {
+            $this->transport->sendLogCacheBatch($items);
+            return;
+        } catch (Throwable $batchErr) {
+            if ($this->onBatchError !== null) {
+                ($this->onBatchError)($batchErr, self::TYPE_LOG_CACHE, $items);
+            }
+            foreach ($items as $item) {
+                try {
+                    $this->transport->sendLogCache($item);
+                } catch (Throwable $itemErr) {
+                    if ($this->onItemError !== null) {
+                        ($this->onItemError)($itemErr, self::TYPE_LOG_CACHE, $item);
+                    }
+                }
+            }
+        }
     }
 }
